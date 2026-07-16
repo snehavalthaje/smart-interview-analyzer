@@ -38,7 +38,7 @@ def record_audio(duration=WINDOW_SEC, sample_rate=SAMPLE_RATE):
     sd.wait()
     return frames[:, 0]
 from src.utils.feedback_generator import generate_feedback, format_report
-
+from src.video_analysis.predict_video_emotion import predict_video_emotion
 
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -387,7 +387,7 @@ with st.sidebar:
     else:
         st.info("No session data yet.")
 
-    if st.button("🗑️ Clear Session"):
+    if st.button("🗑️ Clear Session",key="clear_session1"):
         st.session_state.session_results = []
         st.session_state.last_result = None
         st.rerun()
@@ -406,12 +406,14 @@ with st.sidebar:
 # ──────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ──────────────────────────────────────────────────────────────────────────────
-
-tab_home, tab_live, tab_upload, tab_report, tab_train = st.tabs([
-    "🏠 Home", "🎙️ Live Analysis", "📂 Upload & Analyze",
-    "📊 Session Report", "🏋️ Train Model"
+tab_home, tab_live, tab_upload, tab_video, tab_report, tab_train = st.tabs([
+    "🏠 Home",
+    "🎙️ Live Analysis",
+    "📂 Audio Upload",
+    "🎥 Video Analysis",
+    "📊 Session Report",
+    "🏋️ Train Model"
 ])
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HOME TAB
@@ -648,7 +650,7 @@ with tab_upload:
             )
             st.plotly_chart(fig_wave, use_container_width=True, key="chart_1")
 
-            if st.button("🧠 Analyse Full File"):
+            if st.button("🧠 Analyse Full File",key="analyse_full_file1"):
                 # Segment into WINDOW_SEC chunks
                 results = []
                 n_chunks = int(duration // WINDOW_SEC)
@@ -685,7 +687,157 @@ with tab_upload:
 
             os.unlink(tmp_path)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# VIDEO ANALYSIS TAB
+# ═══════════════════════════════════════════════════════════════════════════════
 
+with tab_video:
+    st.markdown("## 🎥 Video Emotion Analysis")
+
+    video_model_path = os.path.join(
+        ROOT,
+        "models",
+        "video_emotion_model.keras"
+    )
+
+    if not os.path.exists(video_model_path):
+        st.warning(
+            "⚠️ Video model not found. "
+            "Place video_emotion_model.keras inside the models folder."
+        )
+    else:
+        uploaded_video = st.file_uploader(
+            "Upload an interview video",
+            type=["mp4", "avi", "mov", "mkv", "webm"],
+            key="video_upload"
+        )
+
+        if uploaded_video is not None:
+            file_extension = os.path.splitext(uploaded_video.name)[1]
+
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=file_extension
+            ) as temp_video:
+                temp_video.write(uploaded_video.getbuffer())
+                temp_video_path = temp_video.name
+
+            st.video(uploaded_video)
+
+            if st.button("🧠 Analyse Video", key="analyse_video"):
+                try:
+                    with st.spinner(
+                        "Detecting faces and predicting emotions..."
+                    ):
+                        video_result = predict_video_emotion(
+                            temp_video_path
+                        )
+
+                    if "error" in video_result:
+                        st.error(video_result["error"])
+
+                    else:
+                        st.success("✅ Video analysis completed!")
+
+                        st.markdown("### Main Result")
+
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        col1.metric(
+                            "Dominant Emotion",
+                            video_result["dominant_emotion"].capitalize()
+                        )
+
+                        col2.metric(
+                            "Video Score",
+                            f'{video_result["video_score"]:.2f}/100'
+                        )
+
+                        col3.metric(
+                            "Frames Analysed",
+                            video_result["analyzed_frames"]
+                        )
+
+                        col4.metric(
+                            "Faces Detected",
+                            video_result["face_detected_frames"]
+                        )
+
+                        st.markdown("### Score Breakdown")
+
+                        score1, score2, score3 = st.columns(3)
+
+                        score1.metric(
+                            "Engagement",
+                            f'{video_result["engagement_score"]:.2f}%'
+                        )
+
+                        score2.metric(
+                            "Consistency",
+                            f'{video_result["consistency_score"]:.2f}%'
+                        )
+
+                        score3.metric(
+                            "Visibility",
+                            f'{video_result["visibility_score"]:.2f}%'
+                        )
+
+                        st.markdown("### Emotion Distribution")
+
+                        emotion_counts = video_result["emotion_counts"]
+
+                        emotions = list(emotion_counts.keys())
+                        counts = list(emotion_counts.values())
+
+                        fig_video = go.Figure(
+                            go.Bar(
+                                x=emotions,
+                                y=counts,
+                                text=counts,
+                                textposition="auto"
+                            )
+                        )
+
+                        fig_video.update_layout(
+                            title="Predicted Emotions Across Video Frames",
+                            xaxis_title="Emotion",
+                            yaxis_title="Number of Frames",
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            font_color="#e8e8f0"
+                        )
+
+                        st.plotly_chart(
+                            fig_video,
+                            use_container_width=True,
+                            key="video_emotion_chart"
+                        )
+
+                        with st.expander("View Technical Details"):
+                            st.write(
+                                "Total Frames:",
+                                video_result["total_frames"]
+                            )
+
+                            st.write(
+                                "Analysed Frames:",
+                                video_result["analyzed_frames"]
+                            )
+
+                            st.write(
+                                "Face Detected Frames:",
+                                video_result["face_detected_frames"]
+                            )
+
+                            st.json(video_result)
+
+                except Exception as error:
+                    st.error(f"Video analysis failed: {error}")
+
+            try:
+                os.remove(temp_video_path)
+            except OSError:
+                pass
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION REPORT TAB
 # ═══════════════════════════════════════════════════════════════════════════════
