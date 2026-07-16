@@ -5,11 +5,13 @@ __pycache__/
 processed_faces/
 output_detected/
 
-data/
+data/raw/
 
 requirements_full.txt
 
 .ipynb_checkpoints/
+
+.vscode/
 
 .DS_Store
 Thumbs.db
